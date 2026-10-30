@@ -5,7 +5,7 @@ Recorded on October 30, 2026.
 ## Completed
 
 - Live display detection on an Apple M5 Mac: Studio Display XDR, 5120 × 2880, correctly identified.
-- Eight Node.js tests covering display transitions, debounce, headless state, recovery, email request/results, lock triggers, lock-result verification, retries, and startup protection.
+- Thirteen Node.js tests covering display transitions, debounce, headless state, recovery, email request/results, lock triggers, lock-result verification, retries, and startup protection.
 - Python unit test for both persistent service definitions, startup settings, and restart settings.
 - Python installer syntax check and native Swift helper compilation.
 - Real DirectMail test email and startup alert accepted by the provider. Recipient details, credentials, and receipts remain outside the repository.
@@ -17,8 +17,19 @@ Recorded on October 30, 2026.
 ## Still requires target-machine verification
 
 - Actual inbox delivery, rather than provider acceptance alone.
-- Physical display unplug/replug behavior; transition tests currently use synthetic samples.
 - The target Mac mini's headless and remote-desktop configurations.
 - A full machine reboot, boot-time monitoring, and behavior after FileVault startup unlock and desktop login.
 
 Passing local tests or generating a launchd definition does not establish that these target-machine checks have passed.
+
+## Physical-only detector validation (version 0.3)
+
+- Studio Display XDR was read from an external `IOMobileFramebuffer` hardware node with product attributes and DP transport. The software display list is not used as physical connection evidence.
+- Created a real macOS CGVirtualDisplay test screen alongside the Studio Display. The virtual screen appeared in `system_profiler` but not in the hardware detector. Feeding the live snapshots through event handling produced zero new events, zero lock calls, and zero mail calls. This is a CGVirtualDisplay test, not a live RustDesk client test.
+- The first physical unplug/replug attempt exposed a defect: optional profiler enrichment delayed background sampling, so reconnect did not trigger locking. The earlier lock was a startup baseline, not a reconnect success. Background scanning now never calls `system_profiler`; a regression test enforces this separation.
+- After that fix, the user unplugged and reconnected the Studio Display again. The isolated monitor recorded `disconnected` followed by `connected`; DirectMail accepted both notifications. The lock helper recorded `connected` with `lockStatus: locked` on its first attempt. The user confirmed the screen locked after reconnection.
+- To distinguish reconnect locking from startup locking, the isolated lock test was initialized with the already-observed physical baseline. Production behavior still protects already-connected displays at startup.
+- Temporary email/lock services were unloaded after validation. Test credentials and device-specific snapshots are excluded from Git.
+- Unsupported registry layouts and connected services with unreadable attributes produce explicit errors; prior state is preserved. Upgrade tests suppress unsent software-only events from previous versions.
+
+Remaining hardware coverage: Intel, DisplayLink, HDMI adapters/dummy plugs, other Mac models, and the target mini's exact macOS/RustDesk combination have not been physically validated. The current backend intentionally supports only the tested Apple silicon registry layout and reports unsupported layouts.

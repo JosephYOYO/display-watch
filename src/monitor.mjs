@@ -1,5 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { key, changes } from './displays.mjs';
+export function migrateDetector(state) {
+  if (state.detectorVersion === 2) return;
+  // Old software-only baselines and pending notifications are not evidence of physical connections.
+  delete state.current; delete state.candidate; delete state.samples;
+  for (const event of state.events) {
+    if (event.status === 'pending') { event.status = 'suppressed'; event.reason = 'physical_detector_migration'; }
+    if (event.status === 'sending') event.status = 'unknown';
+  }
+  state.detectorVersion = 2;
+}
 export function observe(state, displays, confirmations, time = new Date().toISOString()) {
   if (key(state.candidate ?? []) !== key(displays) || state.samples === undefined) { state.candidate = displays; state.samples = 1; }
   else state.samples++;

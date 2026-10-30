@@ -8,7 +8,12 @@ func locked() -> Bool {
     return session["CGSSessionScreenIsLocked"] as? Bool == true
 }
 let mode = CommandLine.arguments.dropFirst().first ?? "--check"
-guard ["--check", "--lock", "--status"].contains(mode) else { exit(64) }
+guard ["--check", "--lock", "--status", "--displays"].contains(mode) else { exit(64) }
+if mode == "--displays" {
+    let data = try JSONSerialization.data(withJSONObject: physicalSnapshot(), options: [.sortedKeys])
+    print(String(data: data, encoding: .utf8)!)
+    exit(0)
+}
 if mode == "--status" { print(locked() ? "locked" : "unlocked-or-unavailable"); exit(0) }
 guard let handle = dlopen("/System/Library/PrivateFrameworks/login.framework/Versions/A/login", RTLD_LAZY | RTLD_LOCAL),
       let symbol = dlsym(handle, "SACLockScreenImmediate") else {

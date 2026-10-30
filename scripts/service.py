@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """开机监控服务 + 桌面登录锁屏助手；安装后自动恢复，无需手动运行。"""
 import os
+import json
 import pathlib
 import plistlib
 import pwd
@@ -63,8 +64,13 @@ def main():
     # 先编译和检查锁屏接口，再替换已安装服务；安装时不执行锁屏。
     with tempfile.TemporaryDirectory(prefix='display-watch-build-') as build:
         binary = pathlib.Path(build) / 'lock-screen'
-        run('xcrun', 'swiftc', str(root / 'native/lock-screen.swift'), '-o', str(binary))
+        main_source = pathlib.Path(build) / 'main.swift'
+        shutil.copy2(root / 'native/lock-screen.swift', main_source)
+        run('xcrun', 'swiftc', str(main_source), str(root / 'native/physical-displays.swift'), '-o', str(binary))
         run(str(binary), '--check')
+        snapshot = json.loads(subprocess.check_output([str(binary), '--displays'], text=True))
+        if snapshot.get('schemaVersion') != 1 or snapshot.get('errors'):
+            sys.exit('Physical display detector unavailable: ' + ','.join(snapshot.get('errors', ['invalid_snapshot'])))
         run('launchctl', 'bootout', 'system/' + LABEL, check=False)
         run('launchctl', 'bootout', gui + '/' + LOCK_LABEL, check=False)
         runtime = home / 'runtime'

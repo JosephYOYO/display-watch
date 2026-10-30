@@ -2,12 +2,13 @@
 
 **Email alerts and automatic screen locking when a display is connected to your Mac.**
 
-Display Watch is a lightweight macOS utility for a headless Mac mini, a remotely managed Mac, or a machine kept at another location. It watches the displays reported by macOS, records connection changes, sends email alerts, and can lock the logged-in desktop when a display appears.
+Display Watch is a lightweight macOS utility for a headless Mac mini, a remotely managed Mac, or a machine kept at another location. It watches physical external displays in the IOKit hardware registry, records connection changes, sends email alerts, and can lock the logged-in desktop when a physical display appears. Software-only displays are excluded from triggering actions.
 
 It runs locally with no npm dependencies. Email is sent directly through **Alibaba Cloud DirectMail**; no separate application server or Quiet installation is required.
 
 ## Features
 
+- **Hardware-backed detection:** the native helper reads external framebuffer product attributes and transport information through IOKit. Only manual `status` uses `system_profiler` for optional metadata; background monitoring never waits on it and uses the hardware-reported native resolution.
 - **Connection and disconnection alerts** with the machine name, detection time, and display details.
 - **Automatic screen locking** on a new display connection, or when the desktop helper starts with a display already attached.
 - **Independent locking and email processes:** a slow email request does not block screen locking.
@@ -20,7 +21,7 @@ It runs locally with no npm dependencies. Email is sent directly through **Aliba
 
 ## Requirements
 
-- macOS. Local verification has been performed on an Apple silicon Mac with a Studio Display XDR; validate your own Mac and remote-desktop setup.
+- macOS on **Apple silicon** with the supported external IOKit framebuffer layout. Local verification uses a Studio Display XDR over DisplayPort transport. Intel Macs and DisplayLink/other unsupported driver layouts are not currently supported; the detector reports an error instead of falling back to software-only detection. Validate your own Mac and remote-desktop setup.
 - Node.js **22 or newer** and Python **3**.
 - Xcode Command Line Tools to compile the small native lock helper: `xcode-select --install` if they are not already installed.
 - Administrator access to install the startup services.
@@ -39,10 +40,11 @@ git clone https://github.com/JosephYOYO/display-watch.git
 cd display-watch
 node --version
 python3 --version
+npm run build
 node src/cli.mjs status
 ```
 
-No `npm install` is needed.
+No `npm install` is needed. `npm run build` compiles the native helper without starting monitoring or locking. `status` reports physical `displays`, registry health, and `unverifiedSoftwareDisplays` that do not trigger actions.
 
 ### 2. Create your private configuration
 
@@ -121,7 +123,7 @@ sudo python3 scripts/service.py install "$(id -un)" "$(command -v node)"
 
 **If a display is already connected, the helper can lock your desktop shortly after installation.** Unlock normally to continue. Setting `lockOnConnect` to `false` disables locking while retaining email monitoring.
 
-The installer compiles and checks the native helper, copies runtime files into your Application Support folder, and writes:
+The installer compiles the native helper and checks both the lock API and physical detector before replacing services, copies runtime files into your Application Support folder, and writes:
 
 | Service | Starts when | Installed definition |
 | --- | --- | --- |
@@ -179,7 +181,7 @@ git pull --ff-only
 sudo python3 scripts/service.py install "$(id -un)" "$(command -v node)"
 ```
 
-The installer preserves your configuration and history. Do not recopy the example over your private configuration.
+The installer preserves your configuration and history. Version 0.3 resets older software-only baselines and suppresses their unsent queued notifications, so old virtual-screen events are not delivered after upgrading. A connected physical display establishes a new startup baseline. Display IDs now include the hardware registry path; review any existing `ignoreIds` against the new `status` output. Do not recopy the example over your private configuration.
 
 ### Uninstall
 
@@ -196,12 +198,15 @@ This unloads and removes both service definitions. Configuration, history, logs,
 - The first monitoring run sends a startup alert for displays already attached. A headless startup establishes an empty baseline.
 - Failed scans preserve the previous state instead of being treated as a disconnection.
 - The email monitor compares with its saved baseline after restart. It cannot reconstruct connections that happened while the Mac was off, asleep, or the service was stopped.
-- Vendor/product IDs do not prove a physical monitor is present. Virtual displays, adapters, and HDMI dummy plugs may look like displays. Turning off a monitor may not count as disconnecting it.
+- Vendor/product IDs in software display lists are not sufficient. Only external hardware framebuffer nodes with recognized product and DP/HDMI transport attributes generate actionable displays. Software-only RustDesk placeholders, CGVirtualDisplay screens, and similar virtual screens cannot create a physical event merely by advertising a vendor/product ID.
+- HDMI dummy plugs count as physical connections when exposed through these hardware nodes. A display routed through unsupported hardware/driver layouts may not be detected. Turning off a monitor may not count as disconnecting it.
+- If a physical external service exists but its display attributes cannot be parsed, or no supported registry layout exists, detection fails explicitly. Previous baselines are preserved, `scanError` is saved, and the service logs the error. `status` exits nonzero with a diagnostic. This does not produce a GUI popup or a separate health email.
+- Software displays without matching hardware are listed as unverified, not asserted to be conclusively virtual. This is not a universal classification API for every adapter or future macOS release.
 - Review `status` output during remote access before ignoring an ID. An ignored device will not trigger locking or email.
 
 ### Screen locking
 
-- The helper locks on confirmed connections and when it starts with a display already present. It does not repeatedly lock merely because a display remains connected; you may unlock normally.
+- Background polling uses only the native IOKit helper, avoiding profiler hangs during headless operation. The helper locks on confirmed connections and when it starts with a display already present. It does not repeatedly lock merely because a display remains connected; you may unlock normally.
 - Locking is scoped to the selected user's desktop session. Other accounts and fast user switching are outside the current protection scope.
 - A failed lock is retried up to three times. The helper verifies the session's locked state rather than treating command execution as success.
 - Locking uses the private macOS `SACLockScreenImmediate` API, also used by [Hammerspoon](https://github.com/Hammerspoon/hammerspoon/blob/master/extensions/caffeinate/libcaffeinate.m). Apple does not guarantee this API remains compatible. Reinstall and test after macOS upgrades.
@@ -212,6 +217,8 @@ This unloads and removes both service definitions. Configuration, history, logs,
 Events use `pending`, `accepted`, `failed`, or `unknown` delivery states. Explicit failures retry with exponential backoff, up to five attempts. Timeouts, interrupted responses, or a crash during sending can leave an unknown result; these are not automatically replayed because the original email may already have been sent. Extended offline periods can exhaust retries and require manual review.
 
 Email templates and some installer messages are currently in Chinese; this English guide describes the available functionality, not a fully localized application.
+
+The IOKit property selection was informed by [MonitorControl’s Apple silicon support](https://github.com/MonitorControl/MonitorControl/blob/main/MonitorControl/Support/Arm64DDC.swift) and verified against the local Studio Display registry.
 
 ## Development and validation
 

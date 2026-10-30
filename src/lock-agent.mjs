@@ -23,7 +23,7 @@ async function main() {
   while (true) {
     let displays;
     try { displays = (await scan()).filter(d => !config.ignoreIds.includes(d.id)); }
-    catch { console.error('scan_failed_previous_state_preserved'); }
+    catch { state.scanError = { time: new Date().toISOString(), code: 'physical_scan_failed_previous_state_preserved' }; save(); console.error(state.scanError.code); }
     if (displays) {
       state.events.push(...observe(state, displays, config.confirmSamples));
       // 设备已确认拔出后不再为旧接入请求锁屏。
@@ -31,7 +31,7 @@ async function main() {
       state.events = state.events.slice(-100);
       save();
       await protect(state.events, config.lockOnConnect !== false, () => lockScreen(helper));
-      state.lastScan = new Date().toISOString(); save();
+      state.lastScan = new Date().toISOString(); delete state.scanError; save();
     }
     await new Promise(resolve => setTimeout(resolve, config.intervalSeconds * 1000));
   }

@@ -3,15 +3,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { scan } from './displays.mjs';
-import { observe, dispatch } from './monitor.mjs';
+import { scan, snapshot } from './displays.mjs';
+import { observe, dispatch, migrateDetector } from './monitor.mjs';
 import { validateMail, sendMail } from './mail.mjs';
 const command = process.argv[2] || 'status';
 const directory = process.env.DISPLAY_WATCH_HOME || path.join(os.homedir(), 'Library/Application Support/display-watch');
 const stateFile = path.join(directory, 'state.json');
 const log = value => console.log(JSON.stringify({ time: new Date().toISOString(), ...value }));
 async function main() {
-  if (command === 'status') { console.log(JSON.stringify(await scan(), null, 2)); return; }
+  if (command === 'status') { console.log(JSON.stringify(await snapshot(), null, 2)); return; }
   if (command === 'history') { console.log(fs.existsSync(stateFile) ? fs.readFileSync(stateFile, 'utf8') : '{}'); return; }
   if (!['watch', 'test-mail', 'once'].includes(command)) throw new Error('usage: status | history | watch | once | test-mail');
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -32,6 +32,7 @@ async function main() {
   process.once('exit', release);
   for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => process.exit(0));
   const state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : { events: [] };
+  migrateDetector(state);
   for (const e of state.events) if (e.status === 'sending') e.status = 'unknown';
   delete state.candidate; delete state.samples;
   const save = () => { fs.writeFileSync(`${stateFile}.tmp`, JSON.stringify(state, null, 2), { mode: 0o600 }); fs.renameSync(`${stateFile}.tmp`, stateFile); };
@@ -47,12 +48,12 @@ async function main() {
     try {
       const displays = (await scan()).filter(d => !config.ignoreIds.includes(d.id));
       const events = observe(state, displays, config.confirmSamples);
-      state.events.push(...events); state.lastScan = new Date().toISOString(); save();
+      state.events.push(...events); state.lastScan = new Date().toISOString(); delete state.scanError; save();
       events.forEach(log);
-    } catch { log({ error: 'scan_failed_previous_state_preserved' }); }
+    } catch { state.scanError = { time: new Date().toISOString(), code: 'physical_scan_failed_previous_state_preserved' }; save(); log(state.scanError); }
     await dispatch(state, config, save, sendMail);
     if (command === 'once') break;
     await new Promise(resolve => setTimeout(resolve, config.intervalSeconds * 1000));
   } while (true);
 }
-main().catch(e => { log({ error: ['monitor_already_running', 'config_requires_chmod_600', 'invalid_monitor_config', 'invalid_mail_config', 'invalid_lock_inspect_manually'].includes(e.message) ? e.message : 'command_failed_check_config_and_permissions' }); process.exitCode = 1; });
+main().catch(e => { log({ error: ['monitor_already_running', 'config_requires_chmod_600', 'invalid_monitor_config', 'invalid_mail_config', 'invalid_lock_inspect_manually', 'native_helper_missing_run_npm_run_build', 'invalid_physical_snapshot', 'invalid_physical_display'].includes(e.message) || /^physical_detection_failed:[a-z_,]+$/.test(e.message) ? e.message : 'command_failed_check_config_and_permissions' }); process.exitCode = 1; });
