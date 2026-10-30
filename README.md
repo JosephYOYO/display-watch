@@ -4,7 +4,7 @@
 
 Display Watch is a lightweight macOS utility for a headless Mac mini, a remotely managed Mac, or a machine kept at another location. It watches physical external displays in the IOKit hardware registry, records connection changes, sends email alerts, and can lock the logged-in desktop when a physical display appears. Software-only displays are excluded from triggering actions.
 
-It runs locally with no npm dependencies. Email is sent directly through **Alibaba Cloud DirectMail**; no separate application server or Quiet installation is required.
+It runs locally and sends alerts through **your own SMTP server or email provider**, using Nodemailer. Configure the server, sender, recipient, and credentials yourself; no Alibaba Cloud account, separate application server, or Quiet installation is required.
 
 ## Features
 
@@ -25,9 +25,9 @@ It runs locally with no npm dependencies. Email is sent directly through **Aliba
 - Node.js **22 or newer** and Python **3**.
 - Xcode Command Line Tools to compile the small native lock helper: `xcode-select --install` if they are not already installed.
 - Administrator access to install the startup services.
-- An Alibaba Cloud DirectMail sender account and credentials with permission to send mail.
+- Access to an SMTP server, with its hostname, port, encryption setting, and any required credentials.
 
-SMTP, Gmail app-password authentication, and other email providers are **not currently implemented**. Your receiving mailbox can be any normal email address; only the sending service needs to be DirectMail.
+Use the SMTP settings published by your email provider or your own mail-server administrator. Password/app-password authentication and trusted relays without authentication are supported. Providers that require OAuth-only authentication need a compatible relay; OAuth token flows are not implemented.
 
 ## Quick start
 
@@ -40,11 +40,12 @@ git clone https://github.com/JosephYOYO/display-watch.git
 cd display-watch
 node --version
 python3 --version
+npm ci --omit=dev --ignore-scripts
 npm run build
 node src/cli.mjs status
 ```
 
-No `npm install` is needed. `npm run build` compiles the native helper without starting monitoring or locking. `status` reports physical `displays`, registry health, and `unverifiedSoftwareDisplays` that do not trigger actions.
+`npm ci` installs the exact locked SMTP dependency version. `npm run build` compiles the native helper without starting monitoring or locking. `status` reports physical `displays`, registry health, and `unverifiedSoftwareDisplays` that do not trigger actions.
 
 ### 2. Create your private configuration
 
@@ -69,24 +70,33 @@ Fill in your own values. This example uses placeholder addresses and credentials
   "lockOnConnect": true,
   "ignoreIds": [],
   "mail": {
-    "region": "ap-southeast-1",
-    "from": "alerts@your-verified-domain.example",
+    "provider": "smtp",
+    "from": "alerts@example.com",
     "to": "you@example.com",
-    "accessKeyId": "YOUR_ACCESS_KEY_ID",
-    "accessKeySecret": "YOUR_ACCESS_KEY_SECRET",
-    "securityToken": ""
+    "smtp": {
+      "host": "smtp.your-provider.example",
+      "port": 465,
+      "secure": true,
+      "auth": {
+        "user": "alerts@example.com",
+        "pass": "YOUR_SMTP_PASSWORD_OR_APP_PASSWORD"
+      }
+    }
   }
 }
 ```
 
 #### Email setup
 
-1. Set up and verify your sender domain/address in Alibaba Cloud DirectMail.
-2. Set `mail.region` to the region containing that sender account. Supported values are `ap-southeast-1` (Singapore, default) and `cn-hangzhou` (Hangzhou).
-3. Set `mail.from` to the verified DirectMail sender address.
-4. Set `mail.to` to **your own receiving email address**. The current configuration accepts one recipient.
-5. Fill in the access key ID and secret. Prefer a dedicated identity with only the permissions needed to send mail. For temporary credentials, also provide `securityToken`; update the configuration when credentials expire.
-6. Keep this file private and out of version control. The program requires file permissions of `600`.
+1. Enable SMTP sending with your email provider, if required, and obtain its server settings. There is no built-in or mandatory email provider.
+2. Set `mail.from` to a sender address your server permits, and `mail.to` to **your own receiving email address**. The current configuration accepts one recipient.
+3. Set `mail.smtp.host` and `mail.smtp.port` to your server's hostname and port.
+4. Set `secure: true` for an implicit TLS connection (commonly port **465**). For STARTTLS (commonly port **587**), set `secure: false`; the application then **requires** a successful TLS upgrade before sending. Unencrypted delivery and invalid server certificates are not accepted.
+5. Set `mail.smtp.auth.user` to the SMTP login name and `mail.smtp.auth.pass` to the SMTP password or app-specific authorization code. This may differ from your normal mailbox password. For a trusted relay that requires no login, remove the entire `auth` object instead of leaving empty strings.
+6. If connecting by IP address, you may set `mail.smtp.servername` to the hostname on the server's TLS certificate. Prefer the provider's hostname when available.
+7. Keep this file private and out of version control. The program requires file permissions of `600`. Never commit your mailbox password or authorization code.
+
+The example contains placeholders only. You must provide your own values; no recipient is hardcoded.
 
 | Setting | Purpose |
 | --- | --- |
@@ -95,7 +105,9 @@ Fill in your own values. This example uses placeholder addresses and credentials
 | `confirmSamples` | Consecutive matching samples needed to accept a change; an integer of at least 1. |
 | `lockOnConnect` | Enable automatic locking; defaults to enabled if omitted. |
 | `ignoreIds` | Exact display IDs to exclude from both monitoring and locking. Obtain them with `status`. |
-| `mail.*` | Your sender, recipient, region, and credentials. |
+| `mail.provider` | `smtp` by default; an optional legacy `aliyun` adapter remains available. |
+| `mail.from` / `mail.to` | Your permitted sender address and receiving address. |
+| `mail.smtp.*` | Your SMTP host, port, TLS mode, and optional authentication. |
 
 After editing configuration on an installed machine, rerun the installation command below to reload both services.
 
@@ -105,7 +117,7 @@ After editing configuration on an installed machine, rerun the installation comm
 node src/cli.mjs test-mail
 ```
 
-This sends a clearly labeled test email with the currently detected display. A response of `accepted` means DirectMail accepted the request; check your inbox and spam folder to confirm delivery. Test email does not lock the screen.
+This sends a clearly labeled test email with the currently detected display. A response of `accepted` means your mail server accepted the message; check your inbox and spam folder to confirm delivery. Test email does not lock the screen.
 
 Optionally run the email monitor in the foreground:
 
@@ -123,7 +135,7 @@ sudo python3 scripts/service.py install "$(id -un)" "$(command -v node)"
 
 **If a display is already connected, the helper can lock your desktop shortly after installation.** Unlock normally to continue. Setting `lockOnConnect` to `false` disables locking while retaining email monitoring.
 
-The installer compiles the native helper and checks both the lock API and physical detector before replacing services, copies runtime files into your Application Support folder, and writes:
+The installer compiles the native helper and checks both the lock API and physical detector before replacing services, copies runtime files and the SMTP dependency into your Application Support folder, and writes:
 
 | Service | Starts when | Installed definition |
 | --- | --- | --- |
@@ -178,6 +190,7 @@ From your checkout:
 
 ```sh
 git pull --ff-only
+npm ci --omit=dev --ignore-scripts
 sudo python3 scripts/service.py install "$(id -un)" "$(command -v node)"
 ```
 
@@ -220,6 +233,12 @@ Email templates and some installer messages are currently in Chinese; this Engli
 
 The IOKit property selection was informed by [MonitorControl’s Apple silicon support](https://github.com/MonitorControl/MonitorControl/blob/main/MonitorControl/Support/Arm64DDC.swift) and verified against the local Studio Display registry.
 
+### Existing DirectMail installations
+
+The previous DirectMail adapter remains optional for compatibility. Existing configurations containing `accessKeyId` and no `smtp` section continue to work. To make the choice explicit, use `"provider": "aliyun"` together with your own `region`, `from`, `to`, `accessKeyId`, `accessKeySecret`, and optional `securityToken`. Supported legacy regions are `ap-southeast-1` and `cn-hangzhou`.
+
+To switch an existing installation to SMTP, replace its `mail` object with the SMTP example above, fill in your own settings, and reinstall the services. Do not run a second foreground monitor while the installed service is running.
+
 ## Development and validation
 
 ```sh
@@ -227,6 +246,6 @@ npm test
 python3 -m unittest discover -s test -p '*_test.py'
 ```
 
-Automated tests use synthetic display data and mock email responses; they do not access real credentials or send email. They cover connection transitions, debounce, state recovery, email outcomes, locking decisions, and startup service definitions.
+Automated tests use synthetic display data, mock provider responses, and an isolated local TLS SMTP server with a temporary test certificate; they do not access real credentials or send external email. The TLS protocol test uses macOS `/usr/bin/openssl`. They cover connection transitions, debounce, state recovery, email outcomes, locking decisions, and startup service definitions.
 
 See [VALIDATION.md](VALIDATION.md) for completed local checks and outstanding target-machine validation.

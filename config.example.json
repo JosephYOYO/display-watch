@@ -1,15 +1,18 @@
 {
-  "machine": "mini-friend-home",
+  "machine": "my-mac-mini",
   "intervalSeconds": 10,
   "confirmSamples": 2,
   "lockOnConnect": true,
   "ignoreIds": [],
   "mail": {
-    "region": "ap-southeast-1",
+    "provider": "smtp",
     "from": "",
     "to": "",
-    "accessKeyId": "",
-    "accessKeySecret": "",
-    "securityToken": ""
+    "smtp": {
+      "host": "",
+      "port": 465,
+      "secure": true,
+      "auth": { "user": "", "pass": "" }
+    }
   }
 }

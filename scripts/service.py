@@ -61,6 +61,8 @@ def main():
     if not node.is_file() or not config_path.is_file() or config_path.stat().st_mode & 0o077:
         sys.exit('检查 Node 路径、配置文件及 chmod 600 权限')
     root = pathlib.Path(__file__).resolve().parent.parent
+    if not (root / 'node_modules/nodemailer/package.json').is_file():
+        sys.exit('Missing SMTP dependency. Run npm ci --omit=dev --ignore-scripts before installation.')
     # 先编译和检查锁屏接口，再替换已安装服务；安装时不执行锁屏。
     with tempfile.TemporaryDirectory(prefix='display-watch-build-') as build:
         binary = pathlib.Path(build) / 'lock-screen'
@@ -75,6 +77,7 @@ def main():
         run('launchctl', 'bootout', gui + '/' + LOCK_LABEL, check=False)
         runtime = home / 'runtime'
         shutil.copytree(root / 'src', runtime / 'src', dirs_exist_ok=True)
+        shutil.copytree(root / 'node_modules/nodemailer', runtime / 'node_modules/nodemailer', dirs_exist_ok=True)
         (runtime / 'bin').mkdir(exist_ok=True)
         shutil.copy2(binary, runtime / 'bin/lock-screen')
     for p in [runtime, *runtime.rglob('*')]:

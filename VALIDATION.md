@@ -33,3 +33,12 @@ Passing local tests or generating a launchd definition does not establish that t
 - Unsupported registry layouts and connected services with unreadable attributes produce explicit errors; prior state is preserved. Upgrade tests suppress unsent software-only events from previous versions.
 
 Remaining hardware coverage: Intel, DisplayLink, HDMI adapters/dummy plugs, other Mac models, and the target mini's exact macOS/RustDesk combination have not been physically validated. The current backend intentionally supports only the tested Apple silicon registry layout and reports unsupported layouts.
+
+## Configurable SMTP validation (version 0.4)
+
+- Default configuration now uses user-supplied SMTP settings; sender, recipient, hostname, port, TLS mode, and optional login are configurable.
+- Existing DirectMail configurations remain compatible; no cloud vendor is required for new installations.
+- Fifteen top-level Node.js tests (18 including SMTP subtests) pass. The local TLS SMTP server test verifies authentication, MIME submission and acceptance, recipient rejection, and an interrupted connection after DATA. The last case remains unknown and is not replayed automatically.
+- STARTTLS configuration requires an encrypted upgrade, and TLS certificate verification remains enabled. SMTP server replies and credentials are not copied into error logs.
+- The installer copies the pinned SMTP dependency into the installed runtime, so it does not depend on the original checkout for module loading.
+- No live third-party SMTP mailbox has been configured or externally tested in this session. Users should run the documented test-mail command with their own settings to verify delivery.
