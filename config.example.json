@@ -2,6 +2,7 @@
   "machine": "mini-friend-home",
   "intervalSeconds": 10,
   "confirmSamples": 2,
+  "lockOnConnect": true,
   "ignoreIds": [],
   "mail": {
     "region": "ap-southeast-1",
