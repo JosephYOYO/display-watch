@@ -1,19 +1,24 @@
-# 验证记录
+# Validation
 
-日期：2026-10-30。
+Recorded on October 30, 2026.
 
-- 本机 `system_profiler` 实测：Apple M5，Studio Display XDR，5120 × 2880；工具正确识别同一显示器。
-- `npm test`：8 项通过，覆盖接入/拔出防抖、无头基线、恢复、邮件发送状态和解析，以及锁屏触发、结果验证、失败重试和启动保护。
-- `python3 -m unittest discover -s test -p '*_test.py'`：通过，校验开机监控与桌面锁屏两个服务的持久定义、自动启动和保活配置。
-- `python3 -m py_compile scripts/service.py`：通过。
-- 真实 DirectMail 测试邮件：服务商返回 `accepted`。
-- 本机监听循环：连续两次采样后生成且只生成一条已连接基线记录，邮件返回 `accepted`。
-- 同时启动第二个监听进程：正确拒绝，避免重复发送。
-- 本机测试监听进程已停止；未安装本机常驻服务。
-- 原生锁屏助手本机编译通过，动态接口检查返回 `lock_api_available`。
-- 临时 LaunchAgent 真实运行锁屏助手：从本机 Studio Display 的连续采样生成基线事件，实际调用锁屏并回读系统状态，记录 `lockStatus: locked`，一次成功。该测试不配置邮件，验证锁屏不依赖发信。
-- 随后关闭临时配置的锁屏开关并终止助手进程，launchd 通过 `KeepAlive` 自动重启；读取到新 PID 和新采样记录。临时 LaunchAgent 已卸载。
+## Completed
 
-真实发信凭据、收件地址和服务商回执保存在仓库外的本地配置/状态目录，不提交到 Git。
+- Live display detection on an Apple M5 Mac: Studio Display XDR, 5120 × 2880, correctly identified.
+- Eight Node.js tests covering display transitions, debounce, headless state, recovery, email request/results, lock triggers, lock-result verification, retries, and startup protection.
+- Python unit test for both persistent service definitions, startup settings, and restart settings.
+- Python installer syntax check and native Swift helper compilation.
+- Real DirectMail test email and startup alert accepted by the provider. Recipient details, credentials, and receipts remain outside the repository.
+- A second simultaneous email monitor correctly rejected to prevent duplicate sends.
+- A temporary LaunchAgent ran the lock helper against the connected Studio Display. It locked the desktop and confirmed the system's locked state on the first attempt, without email configuration.
+- After disabling further locking in the temporary test configuration, terminating the helper caused launchd to restart it with a new process ID and fresh scan data.
+- Temporary test processes and the temporary LaunchAgent were removed; no permanent local monitoring service was installed during these checks.
 
-尚未验证：用户收件箱实际收取、物理拔插 Studio Display、目标 Mac mini 的无头/远程桌面组合、LaunchDaemon 开机和 FileVault 解锁后的现场行为。插拔转换目前是合成样本测试，不冒充物理实测。
+## Still requires target-machine verification
+
+- Actual inbox delivery, rather than provider acceptance alone.
+- Physical display unplug/replug behavior; transition tests currently use synthetic samples.
+- The target Mac mini's headless and remote-desktop configurations.
+- A full machine reboot, boot-time monitoring, and behavior after FileVault startup unlock and desktop login.
+
+Passing local tests or generating a launchd definition does not establish that these target-machine checks have passed.

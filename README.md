@@ -1,74 +1,225 @@
 # Display Watch
 
-放在异地的 Mac mini 显示器连接监控。独立运行，不依赖 Quiet 服务；邮件沿用 Quiet 的阿里云 DirectMail RPC 签名方式及简洁 HTML 排版，同时发送纯文本正文。零 npm 依赖，需要 macOS、Node.js 22 或以上；安装需要 Python 3 和 Xcode Command Line Tools（`xcode-select --install`），安装器会编译本机锁屏助手。
+**Email alerts and automatic screen locking when a display is connected to your Mac.**
 
-## 行为
+Display Watch is a lightweight macOS utility for a headless Mac mini, a remotely managed Mac, or a machine kept at another location. It watches the displays reported by macOS, records connection changes, sends email alerts, and can lock the logged-in desktop when a display appears.
 
-- 默认每 10 秒运行一次系统显示器查询，连续两个相同样本才确认变化。通常约 10–20 秒后检测到，再发送邮件；短于检查窗口的插拔可能漏检。
-- 首次启动若已接显示器，会发送“监控启动：当前显示器”提醒；无显示器时建立空基线。后续记录接入与断开。
-- 状态保存在磁盘，重启后比较上一次状态。停机、休眠、FileVault 解锁前，以及机器断电时无法监测；状态相同也不能证明期间从未插拔。
-- 查询失败保留上一状态，避免把命令失败误判成拔出。显示设备自身重新枚举仍可能导致提醒。
-- 邮件状态：`pending` 等待发送、`accepted` 服务商接受、`failed` 明确失败、`unknown` 结果未知。服务商接受不等于收件箱送达。
-- 明确失败按指数退避重试，最多 5 次。网络超时、断流及发送中进程崩溃标记未知，不自动重发，避免重复邮件；需人工核对。长时间离线超过重试次数需要人工处理。
-- 默认 `lockOnConnect: true`：安装服务后，桌面助手对接入/启动时已连接的显示器执行锁屏；独立于邮件，发信超时不会阻塞锁屏。连续样本确认仍需约 10–20 秒，不能保证接入瞬间没有画面。锁屏后可正常解锁，不会因显示器持续连接而反复锁屏。
-- 锁屏助手每次启动会重新检查已连接的设备，防止机器重启后跳过保护。锁屏失败最多尝试 3 次，记录在 `lock-state.json`，不会伪报成功。默认不弹监控通知、不显示菜单栏图标；系统锁屏界面和系统的后台项目管理提示不受本工具控制。
-- 仅保护安装时指定的桌面账户；未登录时本身处于登录界面，助手在该账户登录后启动。其他账户/快速用户切换不在当前保护范围。
+It runs locally with no npm dependencies. Email is sent directly through **Alibaba Cloud DirectMail**; no separate application server or Quiet installation is required.
 
-## 安装到另一台 Mac
+## Features
+
+- **Connection and disconnection alerts** with the machine name, detection time, and display details.
+- **Automatic screen locking** on a new display connection, or when the desktop helper starts with a display already attached.
+- **Independent locking and email processes:** a slow email request does not block screen locking.
+- **Persistent email history** and restart recovery, with duplicate suppression and bounded retries.
+- **Automatic startup:** a system LaunchDaemon starts monitoring at boot; a per-user LaunchAgent starts the lock helper at desktop login. Both restart automatically if they exit.
+- **Background operation:** no application window, menu bar icon, or monitoring notification. The normal macOS lock screen and system background-item notices may still appear.
+- **Configurable email addresses, polling, locking, and ignored displays.** No recipient or credentials are embedded in the source.
+
+> Detection is polling-based, not instantaneous. With the defaults, confirmation usually takes about 10–20 seconds, plus scan time; email delivery takes additional time. Very brief connections can be missed, and a display may show the desktop before locking occurs.
+
+## Requirements
+
+- macOS. Local verification has been performed on an Apple silicon Mac with a Studio Display XDR; validate your own Mac and remote-desktop setup.
+- Node.js **22 or newer** and Python **3**.
+- Xcode Command Line Tools to compile the small native lock helper: `xcode-select --install` if they are not already installed.
+- Administrator access to install the startup services.
+- An Alibaba Cloud DirectMail sender account and credentials with permission to send mail.
+
+SMTP, Gmail app-password authentication, and other email providers are **not currently implemented**. Your receiving mailbox can be any normal email address; only the sending service needs to be DirectMail.
+
+## Quick start
+
+Run the following as the normal macOS user whose desktop you want to protect. Use `sudo` only for the service commands shown below.
+
+### 1. Download and inspect your displays
 
 ```sh
-git clone git@github.com:JosephYOYO/display-watch.git
+git clone https://github.com/JosephYOYO/display-watch.git
 cd display-watch
-npm test
+node --version
+python3 --version
 node src/cli.mjs status
-mkdir -p "$HOME/Library/Application Support/display-watch"
-chmod 700 "$HOME/Library/Application Support/display-watch"
-cp config.example.json "$HOME/Library/Application Support/display-watch/config.json"
-chmod 600 "$HOME/Library/Application Support/display-watch/config.json"
 ```
 
-编辑上述 **仓库外** 的 `config.json`：`machine` 填机器名称；`mail.to` 填收件邮箱；`mail.from` 填 DirectMail 中已验证的发信地址；填写对应区域的 AK/Secret，临时凭据还需 `securityToken`。新加坡默认 `ap-southeast-1`，杭州为 `cn-hangzhou`。区域必须与发信账户匹配。凭据不得放进仓库或聊天；建议为该机器单独配置仅允许发信的凭据。示例没有任何真实凭据，克隆后必须单独安全配置。
+No `npm install` is needed.
+
+### 2. Create your private configuration
+
+The application reads `config.json` from your own Application Support folder, **outside the Git checkout**.
 
 ```sh
-# 发送明确标为测试的邮件，并显示服务商回执
+mkdir -p "$HOME/Library/Application Support/display-watch"
+chmod 700 "$HOME/Library/Application Support/display-watch"
+# Run this copy only for a new installation; do not overwrite an existing config.
+cp config.example.json "$HOME/Library/Application Support/display-watch/config.json"
+chmod 600 "$HOME/Library/Application Support/display-watch/config.json"
+nano "$HOME/Library/Application Support/display-watch/config.json"
+```
+
+Fill in your own values. This example uses placeholder addresses and credentials:
+
+```json
+{
+  "machine": "my-mac-mini",
+  "intervalSeconds": 10,
+  "confirmSamples": 2,
+  "lockOnConnect": true,
+  "ignoreIds": [],
+  "mail": {
+    "region": "ap-southeast-1",
+    "from": "alerts@your-verified-domain.example",
+    "to": "you@example.com",
+    "accessKeyId": "YOUR_ACCESS_KEY_ID",
+    "accessKeySecret": "YOUR_ACCESS_KEY_SECRET",
+    "securityToken": ""
+  }
+}
+```
+
+#### Email setup
+
+1. Set up and verify your sender domain/address in Alibaba Cloud DirectMail.
+2. Set `mail.region` to the region containing that sender account. Supported values are `ap-southeast-1` (Singapore, default) and `cn-hangzhou` (Hangzhou).
+3. Set `mail.from` to the verified DirectMail sender address.
+4. Set `mail.to` to **your own receiving email address**. The current configuration accepts one recipient.
+5. Fill in the access key ID and secret. Prefer a dedicated identity with only the permissions needed to send mail. For temporary credentials, also provide `securityToken`; update the configuration when credentials expire.
+6. Keep this file private and out of version control. The program requires file permissions of `600`.
+
+| Setting | Purpose |
+| --- | --- |
+| `machine` | Name included in email alerts. |
+| `intervalSeconds` | Delay between scans; an integer of at least 5. |
+| `confirmSamples` | Consecutive matching samples needed to accept a change; an integer of at least 1. |
+| `lockOnConnect` | Enable automatic locking; defaults to enabled if omitted. |
+| `ignoreIds` | Exact display IDs to exclude from both monitoring and locking. Obtain them with `status`. |
+| `mail.*` | Your sender, recipient, region, and credentials. |
+
+After editing configuration on an installed machine, rerun the installation command below to reload both services.
+
+### 3. Test email
+
+```sh
 node src/cli.mjs test-mail
-# 前台仅试运行邮件监控，Ctrl-C 停止；自动锁屏需安装下面的桌面助手
+```
+
+This sends a clearly labeled test email with the currently detected display. A response of `accepted` means DirectMail accepted the request; check your inbox and spam folder to confirm delivery. Test email does not lock the screen.
+
+Optionally run the email monitor in the foreground:
+
+```sh
 node src/cli.mjs watch
-# 安装开机监控和登录锁屏助手；当前接有显示器时会锁屏一次
+```
+
+Stop it with **Ctrl-C** before installing the services. Foreground `watch` runs email monitoring only; automatic locking requires the desktop helper installed in the next step.
+
+### 4. Install automatic startup and locking
+
+```sh
 sudo python3 scripts/service.py install "$(id -un)" "$(command -v node)"
 ```
 
-安装器把代码复制到配置目录下的 `runtime/`，持久写入两个服务定义，并显式启用：
+**If a display is already connected, the helper can lock your desktop shortly after installation.** Unlock normally to continue. Setting `lockOnConnect` to `false` disables locking while retaining email monitoring.
 
-- `/Library/LaunchDaemons/com.display-watch.monitor.plist`：开机运行邮件监控，无需桌面自动登录。
-- `~/Library/LaunchAgents/com.display-watch.lock.plist`：该用户桌面登录后运行锁屏助手。
+The installer compiles and checks the native helper, copies runtime files into your Application Support folder, and writes:
 
-两个服务都配置 `RunAtLoad=true`、`KeepAlive=true`，重启/登录后自动执行，异常退出由 launchd 重启。安装时先编译并检查锁屏接口，接口不可用就失败；有桌面会话会立即加载助手，没有则等下次登录。FileVault 启动解锁之前不能运行。Node 必须保留在安装时的绝对路径；升级或删除 nvm 的 Node 版本后需要重新安装服务。重新执行安装命令可更新代码；不要同时运行前台监听与服务。
+| Service | Starts when | Installed definition |
+| --- | --- | --- |
+| Email monitor | macOS boots | `/Library/LaunchDaemons/com.display-watch.monitor.plist` |
+| Lock helper | The selected user logs into the desktop | `~/Library/LaunchAgents/com.display-watch.lock.plist` |
+
+Both use `RunAtLoad` and `KeepAlive`. If the desktop session is already available, the helper starts immediately; otherwise, it starts at the next desktop login. The monitor does not require automatic desktop login. Neither service can run before FileVault startup unlock.
+
+The installer records the absolute path to Node. Keep that installation available; reinstall the services after changing or removing a Node version, especially when using nvm.
+
+### 5. Verify on your Mac
 
 ```sh
-node src/cli.mjs history
 sudo python3 scripts/service.py status "$(id -un)"
+node src/cli.mjs history
+cat "$HOME/Library/Application Support/display-watch/lock-state.json"
+```
+
+After desktop login, check that both launchd jobs report `running`. Connect a display and verify the email and `lockStatus: "locked"` in the lock state. Then restart the Mac, log in, and repeat the status check: `lastScan` in both state files should be newer than the restart.
+
+A service definition on disk is not proof of a successful reboot test. Validate physical connections and your remote-desktop software on the target machine.
+
+## Everyday use
+
+```sh
+# Current displays
+node src/cli.mjs status
+
+# Saved email events and delivery states
+node src/cli.mjs history
+
+# Monitor logs
 tail -f "$HOME/Library/Application Support/display-watch/service.log"
-# 卸载服务，保留配置、状态与历史
+
+# Lock helper errors
+tail -f "$HOME/Library/Application Support/display-watch/lock-error.log"
+```
+
+Runtime data lives in `~/Library/Application Support/display-watch/`:
+
+- `config.json`: private configuration, including email credentials.
+- `state.json`: display baseline and email event history.
+- `lock-state.json`: lock results, up to 100 recent events from the current helper lifetime.
+- `service.log`, `service-error.log`, `lock.log`, `lock-error.log`: runtime logs.
+- `runtime/`: installed source and compiled lock helper.
+
+Email history and logs are not automatically rotated. Review disk usage periodically. `DISPLAY_WATCH_HOME` can select an isolated directory for manual CLI testing; the installer uses the standard per-user directory.
+
+### Update
+
+From your checkout:
+
+```sh
+git pull --ff-only
+sudo python3 scripts/service.py install "$(id -un)" "$(command -v node)"
+```
+
+The installer preserves your configuration and history. Do not recopy the example over your private configuration.
+
+### Uninstall
+
+```sh
 sudo python3 scripts/service.py uninstall "$(id -un)"
 ```
 
-状态与记录在 `state.json`，发送前先原子保存状态；同目录的进程锁阻止重复监听。配置权限必须为 600。`service.log` / `service-error.log` 为运行日志。锁屏助手状态在 `lock-state.json`（最近 100 条，本次助手生命周期），错误在 `lock-error.log`。当前版本不自动清理邮件历史，请定期检查目录大小。可用 `DISPLAY_WATCH_HOME` 指定独立测试目录。
+This unloads and removes both service definitions. Configuration, history, logs, and installed runtime files are retained in Application Support for you to review or remove separately.
 
-## 锁屏接口与重启验收
+## Behavior and limitations
 
-锁屏助手使用 macOS 私有 `SACLockScreenImmediate` 接口，并通过会话的锁定状态确认结果。该接口也被 [Hammerspoon](https://github.com/Hammerspoon/hammerspoon/blob/master/extensions/caffeinate/libcaffeinate.m) 使用，但不是 Apple 稳定公开 API；macOS 升级后应重新安装检查并实测。代码不使用模拟按键、屏保或熄屏代替锁屏。设置 `lockOnConnect: false` 后重新安装服务可关闭锁屏。
+### Display detection
 
-目标 mini 安装后重启，登录后执行 `sudo python3 scripts/service.py status "$(id -un)"`，确认两个任务均为 `running`，检查 `state.json` / `lock-state.json` 的 `lastScan` 为本次开机后的时间；连接显示器，确认锁屏记录 `lockStatus: locked` 并查看邮件。仅有 plist 文件不等于实际开机验证通过。
+- The first monitoring run sends a startup alert for displays already attached. A headless startup establishes an empty baseline.
+- Failed scans preserve the previous state instead of being treated as a disconnection.
+- The email monitor compares with its saved baseline after restart. It cannot reconstruct connections that happened while the Mac was off, asleep, or the service was stopped.
+- Vendor/product IDs do not prove a physical monitor is present. Virtual displays, adapters, and HDMI dummy plugs may look like displays. Turning off a monitor may not count as disconnecting it.
+- Review `status` output during remote access before ignoring an ID. An ignored device will not trigger locking or email.
 
-## 虚拟显示器与检测边界
+### Screen locking
 
-`status` 列出系统识别到的设备。`hardware-reported` 只表示有厂商/产品标识，不是物理显示器真实性证明；HDMI 欺骗器、虚拟屏、扩展坞可能模拟这些属性。默认所有新增显示设备都会提醒，避免静默漏报。确认属于远程桌面的稳定设备后，可以将其 `id` 加入 `ignoreIds`；不要忽略整个厂商或所有未知设备。显示器关屏也不一定意味着断开。
+- The helper locks on confirmed connections and when it starts with a display already present. It does not repeatedly lock merely because a display remains connected; you may unlock normally.
+- Locking is scoped to the selected user's desktop session. Other accounts and fast user switching are outside the current protection scope.
+- A failed lock is retried up to three times. The helper verifies the session's locked state rather than treating command execution as success.
+- Locking uses the private macOS `SACLockScreenImmediate` API, also used by [Hammerspoon](https://github.com/Hammerspoon/hammerspoon/blob/master/extensions/caffeinate/libcaffeinate.m). Apple does not guarantee this API remains compatible. Reinstall and test after macOS upgrades.
+- This is an awareness and response tool, not a guarantee that no desktop content will ever appear on a connected screen. It does not shut down the Mac or disable its display outputs.
 
-新机器安装后应实际插拔一次，并分别测试 SSH、RustDesk 等远程连接是否增加设备。这些机器相关行为无法由另一台 Mac 的测试代替。
+### Email delivery
 
-## 验证
+Events use `pending`, `accepted`, `failed`, or `unknown` delivery states. Explicit failures retry with exponential backoff, up to five attempts. Timeouts, interrupted responses, or a crash during sending can leave an unknown result; these are not automatically replayed because the original email may already have been sent. Extended offline periods can exhaust retries and require manual review.
 
-`npm test` 以及 `python3 -m unittest discover -s test -p '*_test.py'` 使用合成数据和模拟邮件服务验证防抖、无头状态、接入/拔出、重启状态恢复、发送落盘、未知结果不重放、失败退避、邮件转义和 RPC 请求；不会访问真实邮箱或凭据。
+Email templates and some installer messages are currently in Chinese; this English guide describes the available functionality, not a fully localized application.
 
-本机现场验证见 [VALIDATION.md](VALIDATION.md)。
+## Development and validation
+
+```sh
+npm test
+python3 -m unittest discover -s test -p '*_test.py'
+```
+
+Automated tests use synthetic display data and mock email responses; they do not access real credentials or send email. They cover connection transitions, debounce, state recovery, email outcomes, locking decisions, and startup service definitions.
+
+See [VALIDATION.md](VALIDATION.md) for completed local checks and outstanding target-machine validation.
