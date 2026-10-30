@@ -1,0 +1,6 @@
+.env
+*.local.json
+.DS_Store
+.state/
+node_modules/
+__pycache__/

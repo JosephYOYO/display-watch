@@ -1,0 +1,14 @@
+{
+  "machine": "mini-friend-home",
+  "intervalSeconds": 10,
+  "confirmSamples": 2,
+  "ignoreIds": [],
+  "mail": {
+    "region": "ap-southeast-1",
+    "from": "",
+    "to": "",
+    "accessKeyId": "",
+    "accessKeySecret": "",
+    "securityToken": ""
+  }
+}
